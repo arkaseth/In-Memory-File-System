@@ -151,3 +151,195 @@ struct FileNode : INode
 };
 
 /* -------------------- FileSystem Class -------------------- */
+
+class FileSystem
+{
+private:
+    std::shared_ptr<DirectoryNode> root;
+
+    // Resolve path and return pair(parentNode, targetNodeName)
+    std::pair<std::shared_ptr<DirectoryNode>, std::string> resolveParent(const std::string &path)
+    {
+        if (path.empty() || path[0] != '/')
+            throw std::runtime_error("Path must not be empty and should start with \'/\'");
+        auto parts = splitPath(path);
+        if (parts.empty())
+            throw std::runtime_error("Invalid root parent");
+
+        std::shared_ptr<DirectoryNode> curr = root;
+        for (size_t i = 0; i < parts.size() - 1; i++)
+        {
+            const std::string &p = parts[i];
+            auto child = curr->getChild(p);
+            if (!child)
+                throw std::runtime_error("Path " + p + " not found");
+            if (child->type != NodeType::Directory)
+            {
+                throw std::runtime_error(p + " is not a directory");
+            }
+            curr = std::static_pointer_cast<DirectoryNode>(child);
+        }
+        std::string target = parts.back();
+        return std::make_pair(curr, target);
+    }
+
+    // Traverse the whole path and return node pointer
+    std::shared_ptr<INode> traverseNode(const std::string &path)
+    {
+        if (path.empty() || path[0] != '/')
+            throw std::runtime_error("Path must not be empty and should start with \'/\'");
+        auto parts = splitPath(path);
+        if (parts.empty())
+            throw std::runtime_error("Invalid root parent");
+
+        std::shared_ptr<INode> curr = root;
+        for (auto &p : parts)
+        {
+            if (curr->type != NodeType::Directory)
+            {
+                throw std::runtime_error("Path traversed into file instead of directory");
+            }
+
+            auto dir = std::static_pointer_cast<DirectoryNode>(curr);
+            auto child = dir->getChild(p);
+            if (!child)
+                throw std::runtime_error("Path " + p + " not found");
+            curr = child;
+        }
+        return curr;
+    }
+
+    std::shared_ptr<INode> deepCopyNode(const std::shared_ptr<INode> &src)
+    {
+        if (src->type == NodeType::File)
+        {
+            // file cloneShallow copies data as well
+            return src->cloneShallow();
+        }
+        else
+        {
+            auto srcDir = std::static_pointer_cast<DirectoryNode>(src);
+            auto newDir = std::make_shared<DirectoryNode>(srcDir->name);
+            newDir->perms = srcDir->perms;
+            newDir->created = srcDir->created;
+            newDir->modified = srcDir->modified;
+            for (const auto &p : srcDir->children)
+            {
+                auto childCopy = deepCopyNode(p.second);
+                childCopy->name = p.first; // ensure copied child name matches key
+                newDir->addChild(p.first, childCopy);
+            }
+            return newDir;
+        }
+    }
+
+public:
+    FileSystem()
+    {
+        root = std::make_shared<DirectoryNode>('/');
+        root->name = '/';
+    }
+
+    void mkdir(const std::string &path)
+    {
+        auto [parent, name] = resolveParent(path);
+        if (parent->hasChild(name))
+            throw std::runtime_error(name + " already exists");
+        auto dir = std::make_shared<DirectoryNode>(name);
+        parent->addChild(name, dir);
+    }
+
+    void touch(const std::string &path)
+    {
+        auto [parent, name] = resolveParent(path);
+        if (parent->hasChild(name))
+            throw std::runtime_error(name + " already exists");
+        auto file = std::make_shared<FileNode>(name);
+        parent->addChild(name, file);
+    }
+
+    void write(const std::string &path, const std::string &content)
+    {
+        try
+        {
+            auto node = traverseNode(path);
+            if (node->type != NodeType::File)
+                throw std::runtime_error("Can't write to directory " + path);
+            auto file = std::static_pointer_cast<FileNode>(node);
+            file->data.assign(content.begin(), content.end());
+            file->modified = time(nullptr);
+        }
+        catch (const std::runtime_error &e)
+        {
+            // create file if path not found
+            auto [parent, name] = resolveParent(path);
+            auto file = std::make_shared<FileNode>(name);
+            file->data.assign(content.begin(), content.end());
+            parent->addChild(name, file);
+        }
+    }
+
+    void append(const std::string &path, const std::string &content)
+    {
+        try
+        {
+            auto node = traverseNode(path);
+            if (node->type != NodeType::File)
+                throw std::runtime_error("Can't append to directory " + path);
+            auto file = std::static_pointer_cast<FileNode>(node);
+            file->data.insert(file->data.end(), content.begin(), content.end());
+            file->modified = time(nullptr);
+        }
+        catch (...)
+        {
+            touch(path);
+            append(path, content);
+        }
+    }
+
+    std::string read(const std::string &path)
+    {
+        auto node = traverseNode(path);
+        if (node->type != NodeType::File)
+            throw std::runtime_error(path + " is a directory");
+        return std::static_pointer_cast<FileNode>(node)->readAll();
+    }
+
+    std::vector<std::string> ls(const std::string &path)
+    {
+        auto node = traverseNode(path);
+        if (node->type == NodeType::File)
+            return {node->name};
+        auto dir = std::static_pointer_cast<DirectoryNode>(node);
+        return dir->listNames();
+    }
+
+    void rm(const std::string &path, bool recursive = false)
+    {
+        if (path == "/")
+            throw std::runtime_error("Can't remove root");
+        auto [parent, name] = resolveParent(path);
+        auto node = parent->getChild(name);
+        if (!node)
+            throw std::runtime_error(name + " not found");
+        if (node->type == NodeType::Directory)
+        {
+            auto dir = std::static_pointer_cast<DirectoryNode>(node);
+            if (!dir->children.empty() && !recursive)
+                throw std::runtime_error("Directory not empty");
+        }
+        parent->removeChild();
+    }
+
+    void mv(const std::string &src, const std::string &dest)
+    {
+    }
+
+    void cp(const std::string &src, const std::string &dest)
+    {
+    }
+
+    void printTree(const std::string &path = "/", int depth = 0)
+    {
+    }
+};
