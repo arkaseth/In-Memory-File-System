@@ -33,10 +33,10 @@ static std::vector<std::string> splitPath(const std::string &path)
                 parts.push_back(curr);
                 curr.clear();
             }
-            else
-            {
-                curr.push_back(c);
-            }
+        }
+        else
+        {
+            curr.push_back(c);
         }
     }
     if (!curr.empty())
@@ -236,8 +236,8 @@ private:
 public:
     FileSystem()
     {
-        root = std::make_shared<DirectoryNode>('/');
-        root->name = '/';
+        root = std::make_shared<DirectoryNode>("/");
+        root->name = "/";
     }
 
     void mkdir(const std::string &path)
@@ -328,18 +328,152 @@ public:
             if (!dir->children.empty() && !recursive)
                 throw std::runtime_error("Directory not empty");
         }
-        parent->removeChild();
+        parent->removeChild(name);
     }
 
     void mv(const std::string &src, const std::string &dest)
     {
+        if (src == "/")
+            throw std::runtime_error("Cannot move root");
+        auto [srcParent, srcName] = resolveParent(src);
+        auto node = srcParent->getChild(srcName);
+        if (!node)
+            throw std::runtime_error("Src not found");
+
+        try
+        {
+            auto destNode = traverseNode(dest);
+            if (destNode->type == NodeType::Directory)
+            {
+                auto destDir = std::static_pointer_cast<DirectoryNode>(destNode);
+                if (destDir->hasChild(srcName))
+                    throw std::runtime_error("Target with same name exists in destination");
+                srcParent->removeChild(srcName);
+                destDir->addChild(srcName, node);
+                node->name = srcName;
+                return;
+            }
+            else
+            {
+                auto [destParent, destName] = resolveParent(dest);
+                destParent->removeChild(destName);
+                srcParent->removeChild(srcName);
+                destParent->addChild(destName, node);
+                node->name = destName;
+                return;
+            }
+        }
+        catch (const std::runtime_error &e)
+        {
+            // dest does not exist
+            auto [destParent, destName] = resolveParent(dest);
+            if (destParent->hasChild(destName))
+                throw std::runtime_error("Destination exists");
+            srcParent->removeChild(srcName);
+            destParent->addChild(destName, node);
+            node->name = destName;
+            return;
+        }
     }
 
     void cp(const std::string &src, const std::string &dest)
     {
+        auto node = traverseNode(src);
+        try
+        {
+            auto destNode = traverseNode(dest);
+            if (destNode->type == NodeType::Directory)
+            {
+                auto destDir = std::static_pointer_cast<DirectoryNode>(destNode);
+                if (destDir->hasChild(node->name))
+                    throw std::runtime_error("Target with same name exists in destination");
+                auto copyNode = deepCopyNode(node);
+                destDir->addChild(copyNode->name, copyNode);
+                copyNode->name = node->name;
+                return;
+            }
+            else
+            {
+                throw std::runtime_error("Destination exists and is not a directory");
+            }
+        }
+        catch (...)
+        {
+            // dest does not exist
+            auto [destParent, destName] = resolveParent(dest);
+            if (destParent->hasChild(destName))
+                throw std::runtime_error("Destination exists");
+            auto copyNode = deepCopyNode(node);
+            destParent->addChild(copyNode->name, copyNode);
+            copyNode->name = destName;
+            return;
+        }
     }
 
     void printTree(const std::string &path = "/", int depth = 0)
     {
+        auto node = traverseNode(path);
+        std::string indent(depth * 2, ' ');
+        if (node->type == NodeType::File)
+        {
+            std::cout << indent << "- " << node->name << " (file, size=" << std::static_pointer_cast<FileNode>(node)->size() << ")\n";
+        }
+        else
+        {
+            auto dir = std::static_pointer_cast<DirectoryNode>(node);
+            std::cout << indent << "+ " << dir->name << " (dir)\n";
+            for (auto &p : dir->children)
+            {
+                printTree((path == "/" ? "" : path) + "/" + p.first, depth + 1);
+            }
+        }
     }
 };
+
+/* -------------------- Main -------------------- */
+
+int main()
+{
+    std::ios::sync_with_stdio(false);
+    std::cin.tie(nullptr);
+
+    FileSystem fs;
+
+    fs.mkdir("/home");
+    fs.mkdir("/home/arka");
+    fs.mkdir("/tmp");
+
+    fs.touch("/home/arka/readme.txt");
+    fs.write("/home/arka/readme.txt", "Hello World!\n");
+    fs.append("/home/arka/readme.txt", "Hope everyone is well!\n");
+
+    fs.write("/tmp/tmp.txt", "Temp note\n");
+
+    std::cout << "ls /home: ";
+    auto list = fs.ls("/home");
+    for (auto &s : list)
+        std::cout << s << " ";
+    std::cout << "\n";
+
+    std::cout << "read /home/arka/readme.txt:\n"
+              << fs.read("/home/arka/readme.txt") << "\n";
+
+    fs.cp("/home/arka/readme.txt", "/tmp/readme_copy.txt");
+    std::cout << "read /tmp/readme_copy.txt:\n"
+              << fs.read("/tmp/readme_copy.txt") << "\n";
+
+    fs.mv("/tmp/readme_copy.txt", "/tmp/readme_moved.txt");
+
+    fs.mkdir("/backup");
+    fs.cp("/home", "/backup/home_backup"); // deep copy of subtree
+    std::cout << "\nFilesystem tree:\n";
+    fs.printTree("/");
+
+    fs.rm("/tmp/note.txt");
+    std::cout << "\nAfter rm /tmp/note.txt, /tmp contains: ";
+    for (auto &s : fs.ls("/tmp"))
+        std::cout << s << " ";
+    std::cout << "\n";
+
+    return 0;
+}
