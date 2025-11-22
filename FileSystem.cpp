@@ -186,11 +186,11 @@ private:
     // Traverse the whole path and return node pointer
     std::shared_ptr<INode> traverseNode(const std::string &path)
     {
+        if (path == "/")
+            return root;
         if (path.empty() || path[0] != '/')
             throw std::runtime_error("Path must not be empty and should start with \'/\'");
         auto parts = splitPath(path);
-        if (parts.empty())
-            throw std::runtime_error("Invalid root parent");
 
         std::shared_ptr<INode> curr = root;
         for (auto &p : parts)
@@ -355,11 +355,12 @@ public:
             }
             else
             {
+                // dest is file -> replace file
                 auto [destParent, destName] = resolveParent(dest);
                 destParent->removeChild(destName);
                 srcParent->removeChild(srcName);
-                destParent->addChild(destName, node);
                 node->name = destName;
+                destParent->addChild(destName, node);
                 return;
             }
         }
@@ -370,8 +371,8 @@ public:
             if (destParent->hasChild(destName))
                 throw std::runtime_error("Destination exists");
             srcParent->removeChild(srcName);
-            destParent->addChild(destName, node);
             node->name = destName;
+            destParent->addChild(destName, node);
             return;
         }
     }
@@ -404,8 +405,8 @@ public:
             if (destParent->hasChild(destName))
                 throw std::runtime_error("Destination exists");
             auto copyNode = deepCopyNode(node);
-            destParent->addChild(copyNode->name, copyNode);
             copyNode->name = destName;
+            destParent->addChild(copyNode->name, copyNode);
             return;
         }
     }
@@ -469,8 +470,8 @@ int main()
     std::cout << "\nFilesystem tree:\n";
     fs.printTree("/");
 
-    fs.rm("/tmp/note.txt");
-    std::cout << "\nAfter rm /tmp/note.txt, /tmp contains: ";
+    fs.rm("/tmp/tmp.txt");
+    std::cout << "\nAfter rm /tmp/tmp.txt, /tmp contains: ";
     for (auto &s : fs.ls("/tmp"))
         std::cout << s << " ";
     std::cout << "\n";
